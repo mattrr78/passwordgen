@@ -1,0 +1,13 @@
+config:
+  target: http://192.168.1.105:32671/api
+  phases:
+    - duration: 20
+      arrivalRate:  1
+scenarios:
+  - flow:
+    - post:
+        url:  "/password"
+        json:
+          count:  10
+          minimumLength:  10
+          hogCpuValue: 30

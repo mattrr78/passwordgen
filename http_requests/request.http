@@ -1,0 +1,9 @@
+POST http://192.168.1.106:30836/api/password
+Content-Type: application/json
+
+{
+  "count": 10,
+  "minimumLength": 10
+}
+
+###
