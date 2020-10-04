@@ -8,7 +8,7 @@ public class PasswordGenerator {
     private static final SecureRandom random = new SecureRandom();
 
     private static final char[] SYMBOLS = {'~', '`', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '-', '_', '+',
-            '=', '{', '[', '}', ']', '|', '\\', ':', ';', '"', '\'', '<', ',', '>', '.', '?', '/'};
+            '=', '{', '[', '}', ']', '|', '\\', ':', ';', '\'', '<', ',', '>', '.', '?', '/'};
 
     String[] generate(GeneratePasswordRequest request)  {
         String[] passwords = new String[request.getCount()];

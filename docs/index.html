@@ -1,1 +1,185 @@
-<img src="images/k8s_cluster_artillery.png" alt="Load testing">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Kubernetes Load Balancing Demo</title>
+    <style>
+        .mono  {
+            font-family: monospace
+        }
+        .note  {
+            background-color: #E0E0E0;
+            padding: 3px
+        }
+    </style>
+</head>
+<body style="font-family: sans-serif; color: #505050; font-size: 15px; padding: 2% 10%">
+<h1>Kubernetes Load Balancing Demo</h1>
+<p>
+    I created this demo (<a href="https://github.com/mattrr78/passwordgen" target="_blank">Github Link</a>) to better
+    understand Kubernetes (k8s for now on) and observe its load balancing in action.  Using
+    <a href="https://microk8s.io/" target="_blank">microk8s</a> as the Kubernetes
+    implementation and <a href="https://artillery.io/" target="_blank">Artillery</a> for load testing, load balancing
+    worked as expected!
+<p>
+    <span class="note">Note: This is not a Kubernetes tutorial.  This write-up assumes you have experience with VMs and
+        an understanding of k8s basics from their
+        <a href="https://kubernetes.io/docs/tutorials/kubernetes-basics/" target="_blank">documentation</a>.</span>
+
+<h2>Virtualization Setup</h2>
+<img src="images/K8STopology.png"
+     alt="Network Topology"
+>
+<p>
+    Running this demo was all done on my laptop that runs Windows 10 Home Edition.  3 VirtualBox virtual machines
+    will be used for the k8s cluster.
+
+    <p>
+        <span class="note">Note:  Every shell interaction in these VMs for this demo
+            will be done as root.</span>
+    </p>
+
+    Steps:
+    <ol>
+    <li>Create a new Ubuntu 20.04.  During installation:
+        <ul>
+            <li>Name the machine box1</li>
+            <li>Enable SSH</li>
+            <li>Select microk8s and docker to be installed</li>
+        </ul>
+    <li>Update all software packages managed by apt and snap.</li>
+    <li>Run<span class="mono"> echo "alias kubectl='microk8s kubectl'" &gt; ~/.bash_aliases</span></li>
+    <li>Shutdown VM and configure VM settings' network adapter to use Bridged instead of NAT because VMs need to
+        communicate with each other.</li>
+    <li>Create 2 full clones of the VM.</li>
+    <li>For each of the cloned VMs:
+        <ul>
+            <li>Start the VM</li>
+            <li>Run<span class="mono"> hostnamectl set-hostname box2 </span>(or<span class="mono"> box3</span>)</li>
+            <li>Edit<span class="mono"> /etc/hosts </span>to change <span class="mono">box1</span> to
+                <span class="mono">box2</span> (or <span class="mono">box3</span>)</li>
+            <li>Shutdown the VM</li>
+        </ul>
+    </li>
+    <li>Start all 3 VMs.</li>
+    </ol>
+All 3 VMs are running.  I use <a href="https://www.putty.org/" target="_blank">PuTTY</a> to SSH into all 3 machines (copy/pasting is
+much easier in PuTTY vs. VirtualBox console) and I am able to go into each VM and ping all of the other VMs thanks to
+bridged networking.
+<h2>microk8s Cluster</h2>
+<p>
+    On each VM, run<pre> microk8s enable ha-cluster </pre>to make sure high availability is enabled.
+    From here, follow <a href="https://microk8s.io/docs/clustering" target="_blank">microk8s' guide to clustering</a>
+    to create the cluster.  In this demo, box1 is the primary node and box2 and box3 are the worker nodes.
+
+<h2>Password Generator Application</h2>
+<p>
+    For this demo, I wrote a Spring Boot application that generates passwords.  A REST controller takes password policy
+    as input and serves up passwords generated based on that policy.  Tomcat port uses default port 8080.
+<p>
+    I included a way to waste CPU if the<span class="mono"> hogCpuValue </span>is set in the request.
+    Setting this value to 30 will run random number generator 30,000 times for each password character generated.
+    We need to do this
+    so that load balancing occurs when a node is spending too much time on the API request.
+<p>
+    <span class="mono">server.tomcat.threads.max</span> is
+    set to <span class="mono">1</span> so that one instance of the running application will only process one API
+    request at a time.  I also include Spring Boot Actuator to properly shutdown the running Spring Boot Application and
+    enabled it in the<span class="mono"> application.properties </span>file.
+
+<h2>Docker</h2>
+<p>
+    With the application built (<span class="mono">gradlew build</span>) and working
+    (<span class="mono">gradlew bootRun</span>), it's time to create the docker image.  I
+    <a href="https://en.wikipedia.org/wiki/Secure_copy_protocol" target="_blank">SCP</a>'d the fat jar (found
+    in<span class="mono"> build/libs</span>) over to the
+    primary node along with the Dockerfile since I can't build docker images on Windows 10 Home Edition.
+    <p>
+        <span class="note">Note: From this point on, all Docker and k8s commands are run on the primary node (box1)
+            through SSH</span>
+    <p>
+    On the primary
+    node, run<pre> docker build . -t localhost:32000/password-gen:v1.0.1</pre> to build the image
+    and<pre> docker run -p 8080:8080 localhost:32000/password-gen:v1.0.1</pre> to run the image.
+    If you have IntelliJ, you can run<span class="mono"> http_requests/request.http </span>to test the running
+    Docker container, and run<span class="mono"> http_requests/shutdown.http </span>to shutdown the Docker container
+    using the Spring Boot Actuator endpoint (after you modify the host to your primary VM address and port to 8080).
+<p>
+    The Docker image needs to be uploaded to a Docker registry so that we can deploy it into k8s.  Fortunately,
+    microk8s ships with a Docker registry provided:
+    <ul>
+    <li>microk8s registry is enabled by running<pre> microk8s enable registry</pre></li>
+    <li>Docker image's tag name uses the registry's hostname (localhost) and registry's port (32000)</li>
+    </ul>
+
+<h2>Kubernetes</h2>
+<p>
+    Run the following to deploy the image to Kubernetes:
+    <pre> kubectl create deployment password-gen --image=localhost:32000/password-gen:v1.0.1</pre>.
+    This will automatically create a deployment with the full
+    name deployment.apps/password-gen.  On deployment creation, only one pod is running in the k8s cluster.  Run the
+    following to run 6 pods in the cluster:
+    <pre> kubectl scale --replicas=6 deployment.apps/password-gen</pre>
+    Port 8080 needs to be exposed from k8s, so run
+    <pre> kubectl expose deployment.apps/password-gen --port=8080 --type=NodePort</pre>
+    Then, to extract the exposed port that forwards to inside the containers' port 8080, run
+    <pre> kubectl get services</pre>
+    and find the port that proceeds<span class="mono"> 8080: </span> on the deployment.apps/password-gen line.
+<p>
+    Change the ports
+    in<span class="mono"> http_requests/request.http </span>and<span class="mono"> http_requests/shutdown.http </span>
+    and rerun.  You should get passwords generated when you run request.http.  A pod should go down when running
+    shutdown.http, but it will soon come right back up thanks for k8s.
+
+<h2>Artillery</h2>
+<p>
+    Artillery will now be used to run the load test.  Open load_test.yaml and update the port with the exposed port.
+    When the load test runs, one request will be created every second for 20 seconds.
+<p>
+    Before invoking the load test, go to each SSH session and run<span class="mono"> htop </span>to observe activity on
+    each VM node.
+<p>
+    Now run <pre>artillery run load_test.yaml</pre>
+
+<h2>Load Balancing</h2>
+<p>
+    This screenshot has the 3 PuTTY sessions connected to each k8s clustered node on the left and Artillery execution
+    on the right.
+<p>
+    <a href="images/k8s_cluster_artillery.png" target="_blank">
+        <img src="images/k8s_cluster_artillery.png"
+             style="width: 800px; height: auto;"
+             alt="Load testing"/>
+    </a>
+<p>
+    From the screenshot, load balancing is working.  Observations running the load test multiple times:
+    <ul>
+    <li>The<span class="mono"> java -jar /passwordgen-1.0.1.jar </span>commands really are being run from inside docker
+        containers hosted by k8s.  None of these VirtualBox VMs have Java installed.</li>
+    <li>box1, the primary node, never acted as a worker node.</li>
+    <li>The URL that Artillery hit was always box1's address, and box1 always forwarded the work to box2 and box3.</li>
+    <li>If I had more pods running or if I was only running 2 nodes, box1 would probably act as a worker node.</li>
+    <li>k8s would try to put all of the work on box3.  When box3 became overworked, k8s would give work to box2.  When
+        box2 became overworked and box3 was completing all of its work, k8s would go back to giving box3 more work.</li>
+    <li>I have 16 GB of RAM on this laptop.  I was using close to 100% memory running this load balancing test.</li>
+    </ul>
+
+<h2>Summary</h2>
+<p>
+    This demo was a success!  microk8s and docker installation couldn't be simpler.  Learning a little bit of Artillery
+    to get this load balancing demo setup maybe took an hour.
+<p>
+    There are some approaches I would like to tweak with this demo:
+    <ul>
+    <li>Stop doing everything as root!  Research correct way to setup users/groups.</li>
+    <li>I would like to experiment with using
+        <a href="https://github.com/GoogleContainerTools/distroless" target="_blank">distroless images</a> vs. Alpine
+        Linux images to cut down on size and memory usage</li>
+    <li>Change build process to use Docker layers vs. fat jar
+        (<a href="https://phauer.com/2019/no-fat-jar-in-docker-image/" target="_blank">reference</a>)</li>
+    </ul>
+
+<p style="font-size: 16px">
+    If you have any questions about this demo, send me a Tweet
+    <a href="https://twitter.com/mattrr78" target="_blank">@mattrr78</a>!
+</body>
+</html>

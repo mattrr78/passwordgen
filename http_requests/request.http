@@ -1,4 +1,4 @@
-POST http://192.168.1.106:30836/api/password
+POST http://localhost:8080/api/password
 Content-Type: application/json
 
 {
