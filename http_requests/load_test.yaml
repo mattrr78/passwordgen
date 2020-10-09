@@ -1,7 +1,7 @@
 config:
-  target: http://192.168.1.105:32671/api
+  target: http://localhost:8080/api
   phases:
-    - duration: 20
+    - duration: 5
       arrivalRate:  1
 scenarios:
   - flow:

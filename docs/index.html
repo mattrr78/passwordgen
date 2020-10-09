@@ -99,8 +99,8 @@ bridged networking.
             through SSH</span>
     <p>
     On the primary
-    node, run<pre> docker build . -t localhost:32000/password-gen:v1.0.1</pre> to build the image
-    and<pre> docker run -p 8080:8080 localhost:32000/password-gen:v1.0.1</pre> to run the image.
+    node, run<pre> docker build . -t localhost:32000/password-gen:v1.0.0</pre> to build the image
+    and<pre> docker run -p 8080:8080 localhost:32000/password-gen:v1.0.0</pre> to run the image.
     If you have IntelliJ, you can run<span class="mono"> http_requests/request.http </span>to test the running
     Docker container, and run<span class="mono"> http_requests/shutdown.http </span>to shutdown the Docker container
     using the Spring Boot Actuator endpoint (after you modify the host to your primary VM address and port to 8080).
@@ -111,11 +111,13 @@ bridged networking.
     <li>microk8s registry is enabled by running<pre> microk8s enable registry</pre></li>
     <li>Docker image's tag name uses the registry's hostname (localhost) and registry's port (32000)</li>
     </ul>
+    To push the Docker image to the registry hosted by microk8s, run
+    <pre> docker push localhost:32000/password-gen:v1.0.0</pre>
 
 <h2>Kubernetes</h2>
 <p>
     Run the following to deploy the image to Kubernetes:
-    <pre> kubectl create deployment password-gen --image=localhost:32000/password-gen:v1.0.1</pre>.
+    <pre> kubectl create deployment password-gen --image=localhost:32000/password-gen:v1.0.0</pre>.
     This will automatically create a deployment with the full
     name deployment.apps/password-gen.  On deployment creation, only one pod is running in the k8s cluster.  Run the
     following to run 6 pods in the cluster:
@@ -128,8 +130,15 @@ bridged networking.
 <p>
     Change the ports
     in<span class="mono"> http_requests/request.http </span>and<span class="mono"> http_requests/shutdown.http </span>
-    and rerun.  You should get passwords generated when you run request.http.  A pod should go down when running
-    shutdown.http, but it will soon come right back up thanks for k8s.
+    and rerun.  You should get passwords generated when you run<span class="mono"> request.http</span>.
+    A pod should go down when running<span class="mono"> shutdown.http</span>, but it will soon come right back up
+    thanks to k8s.
+<p>
+    Updating a deployment's image can be done with one command.  Change the version to 1.0.1 in Application.java,
+    build.gradle, and Dockerfile.  Rebuild to get the new passwordgen-1.0.1.jar file, copy the updated Dockerfile and
+    newly built jar file to where k8s is hosted.  Rerun the docker build command setting version to 1.0.1 and then
+    push the new docker version to the registry.  To update the image, run
+    <pre> kubectl set image deployment.apps/password-gen password-gen=localhost:32000/password-gen:v1.0.1</pre>
 
 <h2>Artillery</h2>
 <p>
@@ -154,7 +163,7 @@ bridged networking.
 <p>
     From the screenshot, load balancing is working.  Observations running the load test multiple times:
     <ul>
-    <li>The<span class="mono"> java -jar /passwordgen-1.0.1.jar </span>commands really are being run from inside docker
+    <li>The<span class="mono"> java -jar /passwordgen-1.0.0.jar </span>commands really are being run from inside docker
         containers hosted by k8s.  None of these VirtualBox VMs have Java installed.</li>
     <li>box1, the primary node, never acted as a worker node.</li>
     <li>The URL that Artillery hit was always box1's address, and box1 always forwarded the work to box2 and box3.</li>
